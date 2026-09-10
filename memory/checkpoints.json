@@ -5,6 +5,7 @@
     "analysis/requirements-refiner",
     "implementation/dependencies-resolver",
     "implementation/exceptions-developer",
+    "implementation/io-developer",
     "implementation/template-developer",
     "implementation/utilities-developer",
     "init"

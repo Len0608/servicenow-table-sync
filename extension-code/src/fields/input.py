@@ -1,337 +1,497 @@
-"""InputFields dataclass for input parsing and validation."""
+"""InputFields dataclass for UAC Universal Extension.
 
-from dataclasses import dataclass
+Handles input parsing, preprocessing, and validation.
+"""
+
+from dataclasses import dataclass, fields as dataclass_fields, asdict
+from typing import Optional, Dict, Any
+import json
 from pathlib import Path
-from typing import Optional, Any, Dict, List, get_type_hints, Union, get_origin, get_args
-from fields.output import OutputFields
+
 from fields.types import (
+    Credential,
     Text,
     Integer,
-    Float,
     Boolean,
     SingleChoice,
     MultiChoice,
-    Credential,
-    Script,
-    Array,
 )
+from fields.output import OutputFields
 from exceptions import DataValidationError
 from manager import ExtensionManager
-from dataclasses import fields as dataclass_fields
-from dataclasses import asdict
 
 extension_manager = ExtensionManager()
 
 
 @dataclass
 class InputFields:
-    """Input fields from UAC with validation.
+    """Input fields for ServiceNow Table Sync extension."""
 
-    Define fields based on your template.json fields using wrapper types.
-    All fields should use wrapper types from fields.types for type safety.
-
-    All user-defined fields should be Optional[Type] = None
-    - UAC Controller enforces required field validation (template.json)
-    - By the time fields reach the extension, they may be None
-    - Only validate fields that have values (check for None first)
-    """
-
-    # User-defined fields - ALWAYS Optional, even if required in template.json
     action: Optional[SingleChoice] = None
-
-    # Define your extension's fields here using wrapper types
-    # Example fields:
-    # resource_name: Optional[Text] = None
-    # timeout: Optional[Integer] = None
-    # api_credential: Optional[Credential] = None
-    # tags: Optional[MultiChoice] = None
-
-    # Script fields - use Script wrapper (UAC returns temp file path)
-    # sql_query: Optional[Script] = None
-    # json_payload: Optional[Script] = None
-
-    # Control fields - use MultiChoice for multi-select options
-    # stdout_options: Optional[MultiChoice] = None
-    # output_options: Optional[MultiChoice] = None
-
-    # Previous run output (auto-populated for re-runs)
+    universal_agent: Optional[Text] = None
+    uac_credential: Optional[Credential] = None
+    servicenow_credential: Optional[Credential] = None
+    target_mode: Optional[SingleChoice] = None
+    source_dataset: Optional[SingleChoice] = None
+    source_scope: Optional[SingleChoice] = None
+    business_service: Optional[SingleChoice] = None
+    source_object: Optional[SingleChoice] = None
+    include_calendar_custom_days: Optional[Boolean] = None
+    sap_filter_strategy: Optional[SingleChoice] = None
+    sap_job_name_filter: Optional[Text] = None
+    customer_table: Optional[SingleChoice] = None
+    target_fields: Optional[MultiChoice] = None
+    decision_table: Optional[SingleChoice] = None
+    decision_inputs: Optional[MultiChoice] = None
+    decision_results: Optional[MultiChoice] = None
+    customer_record: Optional[SingleChoice] = None
+    field_mappings_customer: Optional[Text] = None
+    account_association_config: Optional[Text] = None
+    decision_mapping_config: Optional[Text] = None
+    http_timeout_seconds: Optional[Integer] = None
+    output_verbosity: Optional[SingleChoice] = None
     previous_output: Optional[OutputFields] = None
-
-    # Skip validation flag (internal use only)
     _skip_validation: bool = False
 
     @staticmethod
-    def preprocess_fields(fields: dict) -> dict:
-        """Preprocess raw UAC fields before creating InputFields.
+    def preprocess_fields(fields: Dict[str, Any]) -> Dict[str, Any]:
+        """Preprocess UAC fields before creating InputFields instance.
 
-        Converts raw UAC values to wrapper type instances:
-        1. Filters out flattened credential fields (containing dots)
-        2. Wraps values in appropriate wrapper types based on field type hints
-        3. Extracts previous OutputFields if present (from re-runs)
+        Handles:
+        - Filtering out flattened credential fields (dotted notation)
+        - Converting single-item lists to values
+        - Converting script field paths to Path objects
+        - Extracting previous output fields into OutputFields instance
+
+        Args:
+            fields: Raw fields dictionary from UAC
+
+        Returns:
+            Processed fields dictionary safe for InputFields(**processed)
         """
-
         processed = {}
-        previous_output_data = {}
+        output_fields_data = {}
 
-        # Get all OutputFields field names for detection
+        # Get OutputFields field names for automatic detection
         output_field_names = {f.name for f in dataclass_fields(OutputFields)}
 
-        # Get type hints to detect wrapper types
-        type_hints = get_type_hints(InputFields)
-
-        # Map field names to their wrapper types
-        field_wrapper_types = {}
-        for field_name, field_type in type_hints.items():
-            # Get base type (unwrap Optional)
-            base_type = field_type
-            if get_origin(field_type) is Union:
-                args = get_args(field_type)
-                # Filter out NoneType to get the actual type
-                non_none_args = [arg for arg in args if arg is not type(None)]
-                if non_none_args:
-                    base_type = non_none_args[0]
-
-            field_wrapper_types[field_name] = base_type
-
         for key, value in fields.items():
-            # Skip flattened credential fields (e.g., "api_credential.token")
+            # Skip flattened credential fields (e.g., "api_credential.user")
             if "." in key:
                 continue
 
             # Check if this field belongs to OutputFields (previous run data)
-            if key in output_field_names:
-                previous_output_data[key] = value
+            if key in output_field_names and key != "_skip_validation":
+                output_fields_data[key] = value
                 continue
 
-            # Skip None values
-            if value is None:
-                processed[key] = value
-                continue
-
-            # Get the wrapper type for this field
-            wrapper_type = field_wrapper_types.get(key)
-
-            # Convert to appropriate wrapper type
-            if wrapper_type == SingleChoice:
-                # UAC sends as list, SingleChoice expects list
-                if isinstance(value, list):
-                    value = SingleChoice(_values=value)
-                else:
-                    value = SingleChoice(_values=[value])
-
-            elif wrapper_type == MultiChoice:
-                # UAC sends as list, MultiChoice expects list
-                if isinstance(value, list):
-                    value = MultiChoice(values=value)
-                else:
-                    value = MultiChoice(values=[value])
-
-            elif wrapper_type == Script:
-                # UAC sends as string path, Script expects Path object
-                if isinstance(value, str):
-                    value = Script(path=Path(value))
-
-            elif wrapper_type == Credential:
-                # UAC sends as dict, Credential expects kwargs
-                if isinstance(value, dict):
-                    value = Credential.from_dict(value)
-
-            elif wrapper_type == Text:
-                # Wrap string in Text
-                if isinstance(value, str):
-                    value = Text(value=value)
-
-            elif wrapper_type == Integer:
-                # Wrap int in Integer
-                if isinstance(value, int):
-                    value = Integer(value=value)
-
-            elif wrapper_type == Float:
-                # Wrap float in Float
-                if isinstance(value, (int, float)):
-                    value = Float(value=float(value))
-
-            elif wrapper_type == Boolean:
-                # Wrap bool in Boolean
-                if isinstance(value, bool):
-                    value = Boolean(value=value)
-
-            elif wrapper_type == Array:
-                # UAC sends as list of dicts, Array expects list of dicts
-                if isinstance(value, list):
-                    value = Array(pairs=value)
+            # Convert single-item lists to values
+            if isinstance(value, list) and len(value) == 1:
+                value = value[0]
 
             processed[key] = value
 
-        # If we found previous output fields, create OutputFields instance
-        if previous_output_data:
-            # Wrap Text fields in previous output
-            for key, val in previous_output_data.items():
-                if isinstance(val, str):
-                    previous_output_data[key] = Text(value=val)
-            processed["previous_output"] = OutputFields(**previous_output_data)
+        # Create OutputFields if previous output data exists
+        if output_fields_data:
+            try:
+                processed["previous_output"] = OutputFields(**output_fields_data)
+            except Exception:
+                # If OutputFields construction fails, skip it
+                pass
 
         return processed
 
-    def to_dict(self) -> dict:
-        """Convert to dict, unwrapping wrapper types and excluding internal fields.
-
-        Returns:
-            Dict with unwrapped field values, excluding _skip_validation and None previous_output
-        """
-
-        result = {}
-        for f in dataclass_fields(self):
-            key = f.name
-
-            # Skip internal fields
-            if key == "_skip_validation":
-                continue
-
-            value = getattr(self, key)
-
-            # Skip None previous_output
-            if key == "previous_output" and value is None:
-                continue
-
-            result[key] = self._unwrap(value)
-
-        return result
-
-    @staticmethod
-    def _unwrap(value):
-        """Unwrap a single wrapper-type instance to its raw value.
-
-        Dispatches on the actual instance type rather than dict shape, since
-        asdict()-style shape-sniffing breaks for wrapper types that carry
-        extra fields alongside `value` (e.g. Integer's min_value/max_value).
-        """
-        if isinstance(value, SingleChoice):
-            return value.value
-        if isinstance(value, MultiChoice):
-            return value.values
-        if isinstance(value, (Text, Integer, Float, Boolean)):
-            return value.value
-        if isinstance(value, Script):
-            return str(value.path)
-        if isinstance(value, Array):
-            return value.pairs
-        if isinstance(value, Credential):
-            return asdict(value)
-        if isinstance(value, OutputFields):
-            return value.to_dict()
-        return value
-
     def __post_init__(self):
-        """Validate fields after initialization."""
+        """Validate all fields after initialization."""
         if self._skip_validation:
             return
 
-        # Call validation methods
+        # Validate all fields
         self._validate_action()
-        # Add your validation methods here
-        # self._validate_resource_name()
-        # self._validate_timeout()
+        self._validate_universal_agent()
+        self._validate_credentials()
+        self._validate_target_mode()
+        self._validate_source_dataset()
+        self._validate_source_scope()
+        self._validate_business_service()
+        self._validate_source_object()
+        self._validate_include_calendar_custom_days()
+        self._validate_sap_filter_strategy()
+        self._validate_sap_job_name_filter()
+        self._validate_customer_table()
+        self._validate_target_fields()
+        self._validate_decision_table()
+        self._validate_decision_inputs()
+        self._validate_decision_results()
+        self._validate_customer_record()
+        self._validate_field_mappings_customer()
+        self._validate_account_association_config()
+        self._validate_decision_mapping_config()
+        self._validate_http_timeout_seconds()
+        self._validate_output_verbosity()
 
-        # Raise once if errors collected
+        # Raise all collected errors at once
         if extension_manager.has_errors():
             raise DataValidationError(
-                f"Validation failed with {extension_manager.error_count()} error(s)"
+                f"{extension_manager.error_count()} validation error(s)"
             )
 
     def _validate_action(self):
-        """Validate action field (SingleChoice wrapper).
+        """Validate action field."""
+        if self.action is None:
+            exc = DataValidationError("action is required")
+            extension_manager.add_error(exc, field="action")
+            return
 
-        Only validate fields with values - check for None first.
-        """
-        # ALWAYS check for None first - only validate if field has a value
-        if self.action is not None:
-            valid_actions = ["create", "delete", "update", "list"]  # Define your actions
-            # Access SingleChoice value via .value property
-            if self.action.value not in valid_actions:
+        valid_actions = ["Validate Configuration", "Preview", "Synchronize"]
+        if self.action.value not in valid_actions:
+            exc = DataValidationError(
+                f"action must be one of {valid_actions}, got {self.action.value}"
+            )
+            extension_manager.add_error(exc, field="action", value=self.action.value)
+
+    def _validate_universal_agent(self):
+        """Validate universal_agent field."""
+        if self.universal_agent is None:
+            exc = DataValidationError("universal_agent is required")
+            extension_manager.add_error(exc, field="universal_agent")
+            return
+
+        if not self.universal_agent.value or self.universal_agent.value == "":
+            exc = DataValidationError("universal_agent must not be empty")
+            extension_manager.add_error(exc, field="universal_agent")
+
+    def _validate_credentials(self):
+        """Validate credential fields."""
+        if self.uac_credential is None:
+            exc = DataValidationError("uac_credential is required")
+            extension_manager.add_error(exc, field="uac_credential")
+
+        if self.servicenow_credential is None:
+            exc = DataValidationError("servicenow_credential is required")
+            extension_manager.add_error(exc, field="servicenow_credential")
+
+    def _validate_target_mode(self):
+        """Validate target_mode field."""
+        if self.target_mode is None:
+            exc = DataValidationError("target_mode is required")
+            extension_manager.add_error(exc, field="target_mode")
+            return
+
+        valid_modes = [
+            "Customer Tables",
+            "Decision Tables",
+            "Both Customer Tables and Decision Tables",
+        ]
+        if self.target_mode.value not in valid_modes:
+            exc = DataValidationError(
+                f"target_mode must be one of {valid_modes}, got {self.target_mode.value}"
+            )
+            extension_manager.add_error(exc, field="target_mode", value=self.target_mode.value)
+
+    def _validate_source_dataset(self):
+        """Validate source_dataset field."""
+        if self.source_dataset is None:
+            exc = DataValidationError("source_dataset is required")
+            extension_manager.add_error(exc, field="source_dataset")
+            return
+
+        valid_datasets = ["Agents", "Calendars", "Scripts", "SAP/ABAP Jobs"]
+        if self.source_dataset.value not in valid_datasets:
+            exc = DataValidationError(
+                f"source_dataset must be one of {valid_datasets}, got {self.source_dataset.value}"
+            )
+            extension_manager.add_error(
+                exc, field="source_dataset", value=self.source_dataset.value
+            )
+
+    def _validate_source_scope(self):
+        """Validate source_scope field."""
+        if self.source_scope is None:
+            exc = DataValidationError("source_scope is required")
+            extension_manager.add_error(exc, field="source_scope")
+            return
+
+        valid_scopes = ["All Objects", "By Business Service", "Selected Object"]
+        if self.source_scope.value not in valid_scopes:
+            exc = DataValidationError(
+                f"source_scope must be one of {valid_scopes}, got {self.source_scope.value}"
+            )
+            extension_manager.add_error(
+                exc, field="source_scope", value=self.source_scope.value
+            )
+
+    def _validate_business_service(self):
+        """Validate business_service (conditional on source_scope)."""
+        if (
+            self.source_scope
+            and self.source_scope.value == "By Business Service"
+        ):
+            if self.business_service is None or self.business_service.is_empty():
                 exc = DataValidationError(
-                    f"Invalid action '{self.action.value}'. Valid actions: {', '.join(valid_actions)}"
+                    "business_service is required when source_scope is 'By Business Service'"
                 )
-                extension_manager.add_error(exc, field="action", value=self.action.value)
+                extension_manager.add_error(exc, field="business_service")
 
-    # Add your validation methods here
-    # Always check for None first - only validate fields with values
-    #
-    # def _validate_resource_name(self):
-    #     """Validate resource_name field (Text wrapper)."""
-    #     # Always check for None first
-    #     if self.resource_name is not None:
-    #         # Access Text value via .value property
-    #         if len(self.resource_name.value) == 0 or len(self.resource_name.value) > 255:
-    #             exc = DataValidationError("resource_name must be 1-255 characters")
-    #             extension_manager.add_error(
-    #                 exc, field="resource_name", value=self.resource_name.value
-    #             )
-    #
-    # def _validate_timeout(self):
-    #     """Validate timeout field (Integer wrapper)."""
-    #     # Always check for None first - only validate if field has a value
-    #     if self.timeout is not None:
-    #         # Access Integer value via .value property
-    #         if self.timeout.value < 1:
-    #             exc = DataValidationError("timeout must be >= 1")
-    #             extension_manager.add_error(exc, field="timeout", value=self.timeout.value)
-    #
-    # def _validate_sql_query(self):
-    #     """Validate sql_query script field (Script wrapper)."""
-    #     # Always check for None first - only validate if field has a value
-    #     if self.sql_query is not None:
-    #         # Validate file exists using Script wrapper method
-    #         if not self.sql_query.exists():
-    #             exc = DataValidationError("SQL query file not found")
-    #             extension_manager.add_error(exc, field="sql_query")
-    #             return
-    #
-    #         # Read content using Script wrapper method
-    #         try:
-    #             content = self.sql_query.read()
-    #             if not content.strip():
-    #                 exc = DataValidationError("SQL query cannot be empty")
-    #                 extension_manager.add_error(exc, field="sql_query")
-    #         except Exception as e:
-    #             exc = DataValidationError(f"Failed to read SQL query: {str(e)}")
-    #             extension_manager.add_error(exc, field="sql_query")
-    #
-    # def _validate_headers(self):
-    #     """Validate headers array field (Array wrapper).
-    #
-    #     IMPORTANT: UAC sends arrays in FLATTENED format!
-    #     Task definition has: {"name": "X", "value": "Y"}
-    #     UAC transforms to: {"X": "Y"}
-    #
-    #     See Array class documentation in fields/types.py for details.
-    #     """
-    #     # Always check for None first - only validate if field has a value
-    #     if self.headers is not None:
-    #         # Access Array pairs (list of flattened dicts)
-    #         header_list = self.headers.pairs
-    #
-    #         for idx, header in enumerate(header_list):
-    #             # Check if dictionary is empty
-    #             if not header:
-    #                 exc = DataValidationError(f"Header at index {idx} is empty")
-    #                 extension_manager.add_error(exc, field="headers", index=idx)
-    #                 continue
-    #
-    #             # Extract key from flattened format: {"X": "Y"}
-    #             # Do NOT check for "name" property - it doesn't exist!
-    #             header_name = next(iter(header.keys()), "")
-    #             if not header_name:
-    #                 exc = DataValidationError(
-    #                     f"Header at index {idx} must have a non-empty name"
-    #                 )
-    #                 extension_manager.add_error(exc, field="headers", index=idx)
-    #                 continue
-    #
-    #             # Optional: validate header value
-    #             header_value = header[header_name]
-    #             if header_value is None:
-    #                 exc = DataValidationError(
-    #                     f"Header '{header_name}' at index {idx} has null value"
-    #                 )
-    #                 extension_manager.add_error(exc, field="headers", index=idx)
+    def _validate_source_object(self):
+        """Validate source_object (conditional on source_scope)."""
+        if self.source_scope and self.source_scope.value == "Selected Object":
+            if self.source_object is None or self.source_object.is_empty():
+                exc = DataValidationError(
+                    "source_object is required when source_scope is 'Selected Object'"
+                )
+                extension_manager.add_error(exc, field="source_object")
+
+    def _validate_include_calendar_custom_days(self):
+        """Validate include_calendar_custom_days (conditional on source_dataset)."""
+        # No validation needed - UAC enforces Boolean type
+        pass
+
+    def _validate_sap_filter_strategy(self):
+        """Validate sap_filter_strategy (conditional on source_dataset)."""
+        if self.source_dataset and self.source_dataset.value == "SAP/ABAP Jobs":
+            if self.sap_filter_strategy is None:
+                exc = DataValidationError(
+                    "sap_filter_strategy is required when source_dataset is 'SAP/ABAP Jobs'"
+                )
+                extension_manager.add_error(exc, field="sap_filter_strategy")
+            elif self.sap_filter_strategy.value not in [
+                "By Business Service and Type",
+                "By Job Name Partial Match",
+                "All SAP Tasks",
+            ]:
+                exc = DataValidationError(
+                    f"Invalid sap_filter_strategy value: {self.sap_filter_strategy.value}"
+                )
+                extension_manager.add_error(
+                    exc, field="sap_filter_strategy", value=self.sap_filter_strategy.value
+                )
+
+    def _validate_sap_job_name_filter(self):
+        """Validate sap_job_name_filter (conditional on sap_filter_strategy)."""
+        if (
+            self.sap_filter_strategy
+            and self.sap_filter_strategy.value == "By Job Name Partial Match"
+        ):
+            if (
+                self.sap_job_name_filter is None
+                or not self.sap_job_name_filter.value
+                or self.sap_job_name_filter.value == ""
+            ):
+                exc = DataValidationError(
+                    "sap_job_name_filter is required when sap_filter_strategy is 'By Job Name Partial Match'"
+                )
+                extension_manager.add_error(exc, field="sap_job_name_filter")
+
+    def _validate_customer_table(self):
+        """Validate customer_table (conditional on target_mode)."""
+        if self.target_mode and self.target_mode.value in [
+            "Customer Tables",
+            "Both Customer Tables and Decision Tables",
+        ]:
+            if self.customer_table is None or self.customer_table.is_empty():
+                exc = DataValidationError(
+                    "customer_table is required when target_mode includes 'Customer Tables'"
+                )
+                extension_manager.add_error(exc, field="customer_table")
+
+    def _validate_target_fields(self):
+        """Validate target_fields (conditional on target_mode)."""
+        if self.target_mode and self.target_mode.value in [
+            "Customer Tables",
+            "Both Customer Tables and Decision Tables",
+        ]:
+            if self.target_fields is None or self.target_fields.is_empty():
+                exc = DataValidationError(
+                    "target_fields must have at least one selection when target_mode includes 'Customer Tables'"
+                )
+                extension_manager.add_error(exc, field="target_fields")
+
+    def _validate_decision_table(self):
+        """Validate decision_table (conditional on target_mode)."""
+        if self.target_mode and self.target_mode.value in [
+            "Decision Tables",
+            "Both Customer Tables and Decision Tables",
+        ]:
+            if self.decision_table is None or self.decision_table.is_empty():
+                exc = DataValidationError(
+                    "decision_table is required when target_mode includes 'Decision Tables'"
+                )
+                extension_manager.add_error(exc, field="decision_table")
+
+    def _validate_decision_inputs(self):
+        """Validate decision_inputs (conditional on target_mode)."""
+        if self.target_mode and self.target_mode.value in [
+            "Decision Tables",
+            "Both Customer Tables and Decision Tables",
+        ]:
+            if self.decision_inputs is None or self.decision_inputs.is_empty():
+                exc = DataValidationError(
+                    "decision_inputs must have at least one selection when target_mode includes 'Decision Tables'"
+                )
+                extension_manager.add_error(exc, field="decision_inputs")
+
+    def _validate_decision_results(self):
+        """Validate decision_results (conditional on target_mode)."""
+        if self.target_mode and self.target_mode.value in [
+            "Decision Tables",
+            "Both Customer Tables and Decision Tables",
+        ]:
+            if self.decision_results is None or self.decision_results.is_empty():
+                exc = DataValidationError(
+                    "decision_results must have at least one selection when target_mode includes 'Decision Tables'"
+                )
+                extension_manager.add_error(exc, field="decision_results")
+
+    def _validate_customer_record(self):
+        """Validate customer_record (optional override)."""
+        # customer_record is optional - no required validation
+        pass
+
+    def _validate_field_mappings_customer(self):
+        """Validate field_mappings_customer JSON (conditional on target_mode)."""
+        if self.target_mode and self.target_mode.value in [
+            "Customer Tables",
+            "Both Customer Tables and Decision Tables",
+        ]:
+            if self.field_mappings_customer is None:
+                exc = DataValidationError(
+                    "field_mappings_customer is required when target_mode includes 'Customer Tables'"
+                )
+                extension_manager.add_error(exc, field="field_mappings_customer")
+                return
+
+            if not self.field_mappings_customer.value or self.field_mappings_customer.value == "":
+                exc = DataValidationError(
+                    "field_mappings_customer must not be empty"
+                )
+                extension_manager.add_error(exc, field="field_mappings_customer")
+                return
+
+            # Validate JSON syntax
+            try:
+                self.field_mappings_customer.validate_json()
+            except ValueError as e:
+                exc = DataValidationError(
+                    f"field_mappings_customer is not valid JSON: {str(e)}"
+                )
+                extension_manager.add_error(exc, field="field_mappings_customer")
+
+    def _validate_account_association_config(self):
+        """Validate account_association_config JSON (conditional on target_mode)."""
+        if self.target_mode and self.target_mode.value in [
+            "Customer Tables",
+            "Both Customer Tables and Decision Tables",
+        ]:
+            # Only required if customer_record is not specified
+            if self.customer_record is None or self.customer_record.is_empty():
+                if self.account_association_config is None:
+                    exc = DataValidationError(
+                        "account_association_config is required when target_mode includes 'Customer Tables' and customer_record is not specified"
+                    )
+                    extension_manager.add_error(exc, field="account_association_config")
+                    return
+
+                if not self.account_association_config.value or self.account_association_config.value == "":
+                    exc = DataValidationError(
+                        "account_association_config must not be empty"
+                    )
+                    extension_manager.add_error(exc, field="account_association_config")
+                    return
+
+                # Validate JSON syntax
+                try:
+                    self.account_association_config.validate_json()
+                except ValueError as e:
+                    exc = DataValidationError(
+                        f"account_association_config is not valid JSON: {str(e)}"
+                    )
+                    extension_manager.add_error(exc, field="account_association_config")
+
+    def _validate_decision_mapping_config(self):
+        """Validate decision_mapping_config JSON (conditional on target_mode)."""
+        if self.target_mode and self.target_mode.value in [
+            "Decision Tables",
+            "Both Customer Tables and Decision Tables",
+        ]:
+            if self.decision_mapping_config is None:
+                exc = DataValidationError(
+                    "decision_mapping_config is required when target_mode includes 'Decision Tables'"
+                )
+                extension_manager.add_error(exc, field="decision_mapping_config")
+                return
+
+            if not self.decision_mapping_config.value or self.decision_mapping_config.value == "":
+                exc = DataValidationError(
+                    "decision_mapping_config must not be empty"
+                )
+                extension_manager.add_error(exc, field="decision_mapping_config")
+                return
+
+            # Validate JSON syntax
+            try:
+                self.decision_mapping_config.validate_json()
+            except ValueError as e:
+                exc = DataValidationError(
+                    f"decision_mapping_config is not valid JSON: {str(e)}"
+                )
+                extension_manager.add_error(exc, field="decision_mapping_config")
+
+    def _validate_http_timeout_seconds(self):
+        """Validate http_timeout_seconds field."""
+        if self.http_timeout_seconds is not None:
+            try:
+                self.http_timeout_seconds.validate()
+            except ValueError as e:
+                exc = DataValidationError(str(e))
+                extension_manager.add_error(
+                    exc, field="http_timeout_seconds", value=self.http_timeout_seconds.value
+                )
+
+    def _validate_output_verbosity(self):
+        """Validate output_verbosity field."""
+        if self.output_verbosity is None:
+            exc = DataValidationError("output_verbosity is required")
+            extension_manager.add_error(exc, field="output_verbosity")
+            return
+
+        valid_verbosities = ["Summary Only", "Summary and Errors", "Full Details"]
+        if self.output_verbosity.value not in valid_verbosities:
+            exc = DataValidationError(
+                f"output_verbosity must be one of {valid_verbosities}, got {self.output_verbosity.value}"
+            )
+            extension_manager.add_error(
+                exc, field="output_verbosity", value=self.output_verbosity.value
+            )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert InputFields to dictionary.
+
+        Excludes internal fields and empty previous_output.
+
+        Returns:
+            Dictionary representation of fields
+        """
+        result = {}
+        for field in dataclass_fields(self):
+            if field.name.startswith("_"):
+                continue
+
+            value = getattr(self, field.name)
+
+            if value is None:
+                continue
+
+            if field.name == "previous_output" and value is not None:
+                # Convert OutputFields to dict if present
+                result[field.name] = value.to_dict()
+            else:
+                # Convert typed fields to their values
+                if hasattr(value, "value"):
+                    result[field.name] = value.value
+                elif hasattr(value, "values"):
+                    result[field.name] = value.values
+                else:
+                    result[field.name] = value
+
+        return result
