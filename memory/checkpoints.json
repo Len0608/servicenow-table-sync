@@ -6,6 +6,7 @@
     "implementation/action-developer",
     "implementation/dependencies-resolver",
     "implementation/dynamic-choice-developer",
+    "implementation/dynamic-command-developer",
     "implementation/exceptions-developer",
     "implementation/io-developer",
     "implementation/template-developer",
