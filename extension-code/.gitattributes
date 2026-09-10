@@ -1,0 +1,3 @@
+memory/events.jsonl merge=union
+knowledge/decisions/*.md merge=union
+knowledge/LEARNINGS.md merge=union

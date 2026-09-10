@@ -1,0 +1,14 @@
+memory-ephemeral/
+memory/test-results/
+ue-dev-env/
+.env
+transcripts/
+*.local.*
+CLAUDE.local.md
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+3pp/
+logs
