@@ -1,13 +1,15 @@
 """Actions module - Business logic implementations."""
 
 from actions.output import ActionOutput
+from actions.validate_configuration import ValidateConfiguration
+from actions.preview import Preview
+from actions.synchronize import Synchronize
 from manager import ExtensionManager
+
 extension_manager = ExtensionManager()
 
-# Import your action classes here
-# from actions.action_name import ActionName
-
-# Map action names to lambdas that instantiate the class and call execute()
 ACTION_MAPPER = {
-    # "action_name": lambda input_data: ActionName(input_data).execute(),
+    "Validate Configuration": lambda input_data: ValidateConfiguration(input_data).execute(),
+    "Preview": lambda input_data: Preview(input_data).execute(),
+    "Synchronize": lambda input_data: Synchronize(input_data).execute(),
 }

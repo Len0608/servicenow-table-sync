@@ -1,62 +1,68 @@
-"""ActionOutput dataclass for action return values."""
+"""ActionOutput dataclass for ServiceNow Table Sync extension."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Any, Dict, List
+import json
 
 
 @dataclass
 class ActionOutput:
-    """Output from action functions.
+    """Output payload for extension actions."""
 
-    Define fields based on your extension's output needs.
-    Control fields (stdout_options, output_options) are populated from InputFields.
-    """
+    status: Optional[str] = None
+    details: Optional[str] = None
+    error_summary: Optional[str] = None
+    validation_checks: Optional[List[Dict[str, Any]]] = None
+    read_counts: Optional[Dict[str, int]] = None
+    proposed_changes: Optional[Dict[str, int]] = None
+    write_results: Optional[Dict[str, int]] = None
+    errors: Optional[List[Dict[str, Any]]] = None
+    sample_proposed_record: Optional[Dict[str, Any]] = None
+    run_id: Optional[str] = None
+    source_dataset: Optional[str] = None
+    target_mode: Optional[str] = None
+    timestamp_start: Optional[str] = None
+    timestamp_end: Optional[str] = None
+    action: Optional[str] = None
 
-    # Define Extension Output payload fields here (go into the JSON result blob via to_dict()).
-    # These are NOT output-only template fields — those are task instance variables set via
-    # ui.update_output_fields() in fields/output.py and checked with Output Field Should Be.
-    # Example fields:
-    # resource_id: Optional[str] = None
-    # resource_name: Optional[str] = None
-    # details: Optional[Dict[str, Any]] = None
-    # items: Optional[List[Dict[str, Any]]] = None
-    # metadata: Optional[Dict[str, Any]] = None
-
-    # Control fields (from template Choice fields)
-    stdout_options: List[str] = None
-    output_options: List[str] = None
-
-    def __post_init__(self):
-        """Initialize control fields with defaults."""
-        if self.stdout_options is None:
-            self.stdout_options = []
-        if self.output_options is None:
-            self.output_options = []
-
-    def print_output(self):
-        """Print to STDOUT based on stdout_options.
-
-        Implement printing logic based on user selections.
-        Empty list = print everything (if no control fields in template)
-        """
-        # Implement based on your fields
-        pass
+    def print_output(self) -> None:
+        """Print action output to STDOUT."""
+        if self.status:
+            print(f"Status: {self.status}")
+        if self.details:
+            print(f"Details: {self.details}")
+        if self.error_summary:
+            print(f"Errors: {self.error_summary}")
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dict for Extension Output (unv_output).
-
-        Returns dict based on output_options selections.
-        Empty list = include everything (if no control fields in template)
-
-        Serialization rules:
-        - SingleChoice fields  → str  (not a list)
-        - Integer / Float fields → int / float  (not a dict or str)
-        - Boolean fields → bool
-        - Do NOT include an 'errors' key when execution is successful
-        """
-        include_all = len(self.output_options) == 0
+        """Convert to dictionary for Extension Output."""
         output = {}
 
-        # Implement based on your fields
+        if self.status:
+            output["status"] = self.status
+        if self.action:
+            output["action"] = self.action
+        if self.run_id:
+            output["run_id"] = self.run_id
+        if self.source_dataset:
+            output["source_dataset"] = self.source_dataset
+        if self.target_mode:
+            output["target_mode"] = self.target_mode
+        if self.timestamp_start:
+            output["timestamp_start"] = self.timestamp_start
+        if self.timestamp_end:
+            output["timestamp_end"] = self.timestamp_end
+        if self.validation_checks:
+            output["validation_checks"] = self.validation_checks
+        if self.read_counts:
+            output["read_counts"] = self.read_counts
+        if self.proposed_changes:
+            output["proposed_changes"] = self.proposed_changes
+        if self.write_results:
+            output["write_results"] = self.write_results
+        if self.sample_proposed_record:
+            output["sample_proposed_record"] = self.sample_proposed_record
+        if self.errors:
+            output["errors"] = self.errors
 
         return output
