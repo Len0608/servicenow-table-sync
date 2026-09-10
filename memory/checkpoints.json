@@ -4,6 +4,7 @@
     "analysis/requirements-composer",
     "analysis/requirements-refiner",
     "implementation/dependencies-resolver",
+    "implementation/template-developer",
     "init"
   ]
 }
