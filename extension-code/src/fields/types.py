@@ -11,17 +11,19 @@ class Credential:
     """UAC Credential field type.
 
     Represents a credential field with structured access to credential components.
-    UAC flattens credentials into dotted notation (e.g., "api_credential.user"),
+    UAC flattens credentials into dotted notation (e.g., "uac_credential.url"),
     but this provides a structured interface.
 
     Usage:
-        cred = Credential(user="myuser", password="pass", token="abc123")
-        print(cred.user)  # "myuser"
+        cred = Credential(url="https://uac.example.com", username="myuser", password="pass")
+        print(cred.url)  # "https://uac.example.com"
+        print(cred.username)  # "myuser"
         print(cred.password)  # "pass"
-        print(cred.token)  # "abc123"
     """
 
-    user: str
+    url: Optional[str] = None
+    username: Optional[str] = None
+    user: Optional[str] = None
     password: Optional[str] = None
     token: Optional[str] = None
     passphrase: Optional[str] = None

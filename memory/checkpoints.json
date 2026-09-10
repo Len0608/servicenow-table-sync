@@ -5,6 +5,7 @@
     "analysis/requirements-refiner",
     "implementation/action-developer",
     "implementation/dependencies-resolver",
+    "implementation/dynamic-choice-developer",
     "implementation/exceptions-developer",
     "implementation/io-developer",
     "implementation/template-developer",
