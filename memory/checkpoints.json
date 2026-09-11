@@ -3,6 +3,7 @@
     "analysis/extension-designer",
     "analysis/requirements-composer",
     "analysis/requirements-refiner",
+    "enhance-v1.0.1",
     "implementation/action-developer",
     "implementation/dependencies-resolver",
     "implementation/dynamic-choice-developer",
