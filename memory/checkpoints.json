@@ -4,6 +4,7 @@
     "analysis/requirements-composer",
     "analysis/requirements-refiner",
     "enhance-v1.0.1",
+    "enhance-v1.0.2",
     "implementation/action-developer",
     "implementation/dependencies-resolver",
     "implementation/dynamic-choice-developer",
